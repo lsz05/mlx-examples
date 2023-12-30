@@ -3,9 +3,10 @@
 import argparse
 import json
 import time
+import glob
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -41,27 +42,6 @@ class RMSNorm(nn.Module):
         return self.weight * output
 
 
-class RoPE(nn.RoPE):
-    def __init__(self, dims: int, traditional: bool = False, base: float = 10000):
-        super().__init__(dims, traditional)
-        self.base = base
-
-    def __call__(self, x, offset: int = 0):
-        shape = x.shape
-        x = mx.reshape(x, (-1, shape[-2], shape[-1]))
-        N = x.shape[1] + offset
-        costheta, sintheta = RoPE.create_cos_sin_theta(
-            N, self.dims, offset=offset, base=self.base, dtype=x.dtype
-        )
-
-        rope = (
-            self._compute_traditional_rope if self.traditional else self._compute_rope
-        )
-        rx = rope(costheta, sintheta, x)
-
-        return mx.reshape(rx, shape)
-
-
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -78,7 +58,7 @@ class Attention(nn.Module):
         self.wk = nn.Linear(args.dim, args.n_kv_heads * args.head_dim, bias=False)
         self.wv = nn.Linear(args.dim, args.n_kv_heads * args.head_dim, bias=False)
         self.wo = nn.Linear(args.n_heads * args.head_dim, args.dim, bias=False)
-        self.rope = RoPE(
+        self.rope = nn.RoPE(
             args.head_dim, traditional=args.rope_traditional, base=args.rope_theta
         )
 
@@ -87,7 +67,7 @@ class Attention(nn.Module):
         x: mx.array,
         mask: Optional[mx.array] = None,
         cache: Optional[Tuple[mx.array, mx.array]] = None,
-    ) -> mx.array:
+    ) -> Tuple[mx.array, Tuple[mx.array, mx.array]]:
         B, L, D = x.shape
 
         queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
@@ -239,7 +219,6 @@ def toc(msg, start):
 
 
 def generate(args):
-
     input("Press enter to start generation")
     print("------")
     print(args.prompt)
@@ -352,7 +331,23 @@ def sanitize_config(config, weights):
 
 def load_model(model_path):
     model_path = Path(model_path)
-    weights = mx.load(str(model_path / "weights.npz"))
+
+    unsharded_weights_path = Path(model_path / "weights.npz")
+    if unsharded_weights_path.is_file():
+        print("[INFO] Loading model from {}.".format(unsharded_weights_path))
+        weights = mx.load(str(unsharded_weights_path))
+    else:
+        sharded_weights_glob = str(model_path / "weights.*.npz")
+        weight_files = glob.glob(sharded_weights_glob)
+        print("[INFO] Loading model from {}.".format(sharded_weights_glob))
+
+        if len(weight_files) == 0:
+            raise FileNotFoundError("No weights found in {}".format(model_path))
+
+        weights = {}
+        for wf in weight_files:
+            weights.update(mx.load(wf).items())
+
     with open(model_path / "config.json", "r") as f:
         config = sanitize_config(json.loads(f.read()), weights)
         quantization = config.pop("quantization", None)
@@ -368,7 +363,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Llama inference script")
     parser.add_argument(
         "--model-path",
-        help="Path to the model directory containing the MLX weights",
+        help="Path to the model weights and tokenizer",
         default="mlx_model",
     )
     parser.add_argument(
@@ -395,7 +390,6 @@ if __name__ == "__main__":
 
     mx.random.seed(args.seed)
 
-    print("[INFO] Loading model from disk.")
     model, tokenizer = load_model(args.model_path)
     if args.few_shot:
         few_shot_generate(args)

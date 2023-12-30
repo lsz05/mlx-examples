@@ -60,10 +60,10 @@ def llama(model_path):
 def tiny_llama(model_path):
     try:
         import transformers
-    except ImportError as e:
+    except ImportError:
         print("The transformers package must be installed for this model conversion:")
         print("pip install transformers")
-        exit(0)
+        exit(1)
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         str(model_path)
@@ -140,6 +140,22 @@ def quantize(weights, config, args):
     return quantized_weights, quantized_config
 
 
+def make_shards(weights: dict, max_file_size_gibibyte: int = 15):
+    max_file_size_bytes = max_file_size_gibibyte << 30
+    shards = []
+    shard, shard_size = {}, 0
+    for k, v in weights.items():
+        # TODO: simplify to v.nbytes as soon as mx.array exposes it
+        estimated_size = v.size * v.dtype.size if isinstance(v, mx.array) else v.nbytes
+        if shard_size + estimated_size > max_file_size_bytes:
+            shards.append(shard)
+            shard, shard_size = {}, 0
+        shard[k] = v
+        shard_size += estimated_size
+    shards.append(shard)
+    return shards
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert Llama weights to MLX")
     parser.add_argument(
@@ -170,13 +186,13 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "--q_group_size",
+        "--q-group-size",
         help="Group size for quantization.",
         type=int,
         default=64,
     )
     parser.add_argument(
-        "--q_bits",
+        "--q-bits",
         help="Bits per weight for quantization.",
         type=int,
         default=4,
@@ -200,6 +216,11 @@ if __name__ == "__main__":
         str(torch_path / "tokenizer.model"),
         str(mlx_path / "tokenizer.model"),
     )
-    np.savez(str(mlx_path / "weights.npz"), **weights)
+    shards = make_shards(weights)
+    if len(shards) == 1:
+        np.savez(str(mlx_path / f"weights.npz"), **shards[0])
+    else:
+        for i, shard in enumerate(shards):
+            np.savez(str(mlx_path / f"weights.{i:02d}.npz"), **shard)
     with open(mlx_path / "config.json", "w") as fid:
         json.dump(params, fid, indent=4)
