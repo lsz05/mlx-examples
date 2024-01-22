@@ -10,7 +10,7 @@ from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 # Local imports
-from .models import llama, mixtral, phi2
+from .models import llama, mixtral, phi2, gpt_neox
 from .models.base import BaseModelArgs
 
 # Constants
@@ -19,6 +19,7 @@ MODEL_MAPPING = {
     "mistral": llama,  # mistral is compatible with llama
     "mixtral": mixtral,
     "phi": phi2,
+    "gpt_neox": gpt_neox,
 }
 
 linear_class_predicate = (
