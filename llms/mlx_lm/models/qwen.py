@@ -9,6 +9,7 @@ from .base import BaseModelArgs
 
 @dataclass
 class ModelArgs(BaseModelArgs):
+    model_type: str
     hidden_size: int = 2048
     num_attention_heads: int = 16
     num_hidden_layers: int = 24
@@ -23,20 +24,6 @@ class ModelArgs(BaseModelArgs):
     def __post_init__(self):
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.num_attention_heads
-
-
-class RMSNorm(nn.Module):
-    def __init__(self, dims: int, eps: float = 1e-5):
-        super().__init__()
-        self.weight = mx.ones((dims,))
-        self.eps = eps
-
-    def _norm(self, x):
-        return x * mx.rsqrt(x.square().mean(-1, keepdims=True) + self.eps)
-
-    def __call__(self, x):
-        output = self._norm(x.astype(mx.float32)).astype(x.dtype)
-        return self.weight * output
 
 
 class Attention(nn.Module):
@@ -114,9 +101,9 @@ class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
 
-        self.ln_1 = RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
+        self.ln_1 = nn.RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
         self.attn = Attention(args)
-        self.ln_2 = RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
+        self.ln_2 = nn.RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
         self.mlp = MLP(args)
 
     def __call__(self, x, mask=None, cache=None):
@@ -136,7 +123,7 @@ class QwenModel(nn.Module):
         super().__init__()
         self.wte = nn.Embedding(args.vocab_size, args.hidden_size)
         self.h = [TransformerBlock(args) for _ in range(args.num_hidden_layers)]
-        self.ln_f = RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
+        self.ln_f = nn.RMSNorm(args.hidden_size, eps=args.layer_norm_epsilon)
 
     def __call__(self, inputs, mask=None, cache=None):
         x = self.wte(inputs)
@@ -153,13 +140,13 @@ class QwenModel(nn.Module):
         for e, layer in enumerate(self.h):
             x, cache[e] = layer(x, mask, cache[e])
 
-        x = self.ln_f(x[:, T - 1 : T, :])
-        return x, cache
+        return self.ln_f(x), cache
 
 
 class Model(nn.Module):
     def __init__(self, config: ModelArgs):
         super().__init__()
+        self.model_type = config.model_type
         self.transformer = QwenModel(config)
         self.lm_head = nn.Linear(
             config.hidden_size, config.vocab_size, bias=not config.no_bias
@@ -173,3 +160,7 @@ class Model(nn.Module):
     ) -> Tuple[mx.array, mx.array]:
         y, cache = self.transformer(x, mask, cache)
         return self.lm_head(y), cache
+
+    @property
+    def layers(self):
+        return self.transformer.h

@@ -1,4 +1,6 @@
-mlx
+mlx>=0.8
 numpy
-transformers>=4.37.0
+transformers>=4.38.0
 protobuf
+pyyaml
+jinja2

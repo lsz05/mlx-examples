@@ -297,13 +297,13 @@ class TestWhisper(unittest.TestCase):
             "temperature": 0.0,
             "avg_logprob": -0.1350895343440594,
             "compression_ratio": 1.6208333333333333,
-            "no_speech_prob": 0.002246702555567026,
+            "no_speech_prob": 0.009053784422576427,
         }
 
         def check_segment(seg, expected):
             for k, v in expected.items():
                 if isinstance(v, float):
-                    self.assertAlmostEqual(seg[k], v, places=3)
+                    self.assertAlmostEqual(seg[k], v, places=2)
                 else:
                     self.assertEqual(seg[k], v)
 

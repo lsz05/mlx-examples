@@ -1,4 +1,4 @@
-# Copyright © 2023 Apple Inc.
+# Copyright © 2023-2024 Apple Inc.
 
 import argparse
 import json
@@ -12,7 +12,7 @@ import mlx.optimizers as optim
 import numpy as np
 import utils as lora_utils
 from mlx.utils import tree_flatten, tree_unflatten
-from models.lora import LoRALinear
+from models import LoRALinear
 
 
 def build_parser():
@@ -138,8 +138,17 @@ class Dataset:
 
 
 def load(args):
+    def load_and_check(name):
+        dataset_path = Path(args.data) / f"{name}.jsonl"
+        try:
+            return Dataset(dataset_path)
+        except Exception as e:
+            print(f"Unable to build dataset {dataset_path} ({e})")
+            raise
+
     names = ("train", "valid", "test")
-    train, valid, test = (Dataset(Path(args.data) / f"{n}.jsonl") for n in names)
+    train, valid, test = (load_and_check(n) for n in names)
+
     if args.train and len(train) == 0:
         raise ValueError(
             "Training set not found or empty. Must provide training set for fine-tuning."
@@ -292,8 +301,9 @@ def generate(model, prompt, tokenizer, args):
 
         tokens.append(token.item())
         s = tokenizer.decode(tokens)
-        print(s[skip:], end="", flush=True)
-        skip = len(s)
+        if len(s) - skip > 1:
+            print(s[skip:-1], end="", flush=True)
+            skip = len(s) - 1
     print(tokenizer.decode(tokens)[skip:], flush=True)
     print("=" * 10)
     if len(tokens) == 0:

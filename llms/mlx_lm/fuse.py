@@ -3,13 +3,19 @@ import glob
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Union
 
 from mlx.utils import tree_flatten, tree_unflatten
 
+from .gguf import convert_to_gguf
 from .tuner.lora import LoRALinear
 from .tuner.utils import apply_lora_layers, dequantize
-from .utils import fetch_from_hub, get_model_path, save_weights, upload_to_hub
+from .utils import (
+    fetch_from_hub,
+    get_model_path,
+    save_config,
+    save_weights,
+    upload_to_hub,
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -46,6 +52,17 @@ def parse_arguments() -> argparse.Namespace:
         "--de-quantize",
         help="Generate a de-quantized model.",
         action="store_true",
+    )
+    parser.add_argument(
+        "--export-gguf",
+        help="Export model weights in GGUF format.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--gguf-path",
+        help="Path to save the exported GGUF format model weights. Default is ggml-model-f16.gguf.",
+        default="ggml-model-f16.gguf",
+        type=str,
     )
     return parser.parse_args()
 
@@ -87,8 +104,15 @@ def main() -> None:
     if args.de_quantize:
         config.pop("quantization", None)
 
-    with open(save_path / "config.json", "w") as fid:
-        json.dump(config, fid, indent=4)
+    save_config(config, config_path=save_path / "config.json")
+
+    if args.export_gguf:
+        model_type = config["model_type"]
+        if model_type not in ["llama", "mixtral", "mistral"]:
+            raise ValueError(
+                f"Model type {model_type} not supported for GGUF conversion."
+            )
+        convert_to_gguf(model_path, weights, config, str(save_path / args.gguf_path))
 
     if args.upload_repo is not None:
         hf_path = args.hf_path or (
