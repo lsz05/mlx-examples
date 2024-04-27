@@ -6,10 +6,8 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
 import utils
 from huggingface_hub import snapshot_download
-from mlx.utils import tree_flatten, tree_unflatten
 
 
 @dataclass
@@ -282,23 +280,15 @@ def load(gguf_file: str, repo: str = None):
     config = get_config(metadata)
     model = Model(ModelArgs(**config))
     if quantization is not None:
-        # quantized the LM head?
-        qm = model if "lm_head.scales" in weights else model.model
-        nn.QuantizedLinear.quantize_module(
-            qm,
+        class_predicate = (
+            lambda p, m: isinstance(m, (nn.Linear, nn.Embedding))
+            and f"{p}.scales" in weights
+        )
+        nn.quantize(
+            model,
             **quantization,
+            class_predicate=class_predicate,
         )
-
-    def dequantize(k):
-        weight = weights.pop(f"{k}.weight")
-        scales = weights.pop(f"{k}.scales")
-        biases = weights.pop(f"{k}.biases")
-        weights[f"{k}.weight"] = mx.dequantize(
-            weight, scales=scales, biases=biases, **quantization
-        )
-
-    # Dequantize embeddings
-    dequantize("model.embed_tokens")
 
     tokenizer = GGUFTokenizer(metadata)
     model.load_weights(list(weights.items()))

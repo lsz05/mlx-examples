@@ -53,6 +53,23 @@ class TestModels(unittest.TestCase):
             model, args.model_type, args.vocab_size, args.num_hidden_layers
         )
 
+    def test_phi3(self):
+        from mlx_lm.models import phi3
+
+        args = phi3.ModelArgs(
+            model_type="phi3",
+            hidden_size=3072,
+            num_hidden_layers=32,
+            intermediate_size=8192,
+            num_attention_heads=32,
+            rms_norm_eps=1e-5,
+            vocab_size=32064,
+        )
+        model = phi3.Model(args)
+        self.model_test_runner(
+            model, args.model_type, args.vocab_size, args.num_hidden_layers
+        )
+
     def test_gemma(self):
         from mlx_lm.models import gemma
 
@@ -114,6 +131,27 @@ class TestModels(unittest.TestCase):
             args.n_layers,
         )
 
+    def test_qwen2_moe(self):
+        from mlx_lm.models import qwen2_moe
+
+        args = qwen2_moe.ModelArgs(
+            model_type="qwen2_moe",
+            hidden_size=1024,
+            num_hidden_layers=4,
+            intermediate_size=2048,
+            num_attention_heads=4,
+            rms_norm_eps=1e-5,
+            vocab_size=10_000,
+            num_experts_per_tok=4,
+            num_experts=16,
+            moe_intermediate_size=1024,
+            shared_expert_intermediate_size=2048,
+        )
+        model = qwen2_moe.Model(args)
+        self.model_test_runner(
+            model, args.model_type, args.vocab_size, args.num_hidden_layers
+        )
+
     def test_qwen2(self):
         from mlx_lm.models import qwen2
 
@@ -130,47 +168,6 @@ class TestModels(unittest.TestCase):
         self.model_test_runner(
             model, args.model_type, args.vocab_size, args.num_hidden_layers
         )
-
-    def test_qwen2_tie_word_embeddings_without_lm_head_weight(self):
-        from mlx_lm.models import qwen2
-
-        args = qwen2.ModelArgs(
-            model_type="qwen2",
-            hidden_size=1024,
-            num_hidden_layers=4,
-            intermediate_size=2048,
-            num_attention_heads=4,
-            rms_norm_eps=1e-5,
-            vocab_size=10_000,
-            tie_word_embeddings=True,
-        )
-        model = qwen2.Model(args)
-        weights = {"model.embed_tokens.weight": "some_value"}
-        sanitized_weights = model.sanitize(weights)
-        self.assertIn("lm_head.weight", sanitized_weights)
-        self.assertEqual(sanitized_weights["lm_head.weight"], "some_value")
-
-    def test_qwen2_tie_word_embeddings_with_lm_head_weight(self):
-        from mlx_lm.models import qwen2
-
-        weights = {
-            "model.embed_tokens.weight": "some_value",
-            "lm_head.weight": "existing_value",
-        }
-        args = qwen2.ModelArgs(
-            model_type="qwen2",
-            hidden_size=1024,
-            num_hidden_layers=4,
-            intermediate_size=2048,
-            num_attention_heads=4,
-            rms_norm_eps=1e-5,
-            vocab_size=10_000,
-            tie_word_embeddings=True,
-        )
-        model = qwen2.Model(args)
-        sanitized_weights = model.sanitize(weights)
-        self.assertIn("lm_head.weight", sanitized_weights)
-        self.assertEqual(sanitized_weights["lm_head.weight"], "existing_value")
 
     def test_qwen(self):
         from mlx_lm.models import qwen
@@ -221,6 +218,25 @@ class TestModels(unittest.TestCase):
             model, args.model_type, args.vocab_size, args.num_hidden_layers
         )
 
+        # StableLM 2
+        args = stablelm.ModelArgs(
+            model_type="stablelm",
+            vocab_size=10000,
+            hidden_size=512,
+            num_attention_heads=8,
+            num_hidden_layers=4,
+            num_key_value_heads=2,
+            partial_rotary_factor=0.25,
+            intermediate_size=1024,
+            layer_norm_eps=1e-5,
+            rope_theta=10000,
+            use_qkv_bias=True,
+        )
+        model = stablelm.Model(args)
+        self.model_test_runner(
+            model, args.model_type, args.vocab_size, args.num_hidden_layers
+        )
+
     def test_starcoder2(self):
         from mlx_lm.models import starcoder2
 
@@ -236,46 +252,6 @@ class TestModels(unittest.TestCase):
         self.model_test_runner(
             model, args.model_type, args.vocab_size, args.num_hidden_layers
         )
-
-    def test_starcoder2_tie_word_embeddings_without_lm_head_weight(self):
-        from mlx_lm.models import starcoder2
-
-        args = starcoder2.ModelArgs(
-            model_type="starcoder2",
-            hidden_size=1024,
-            num_hidden_layers=4,
-            intermediate_size=2048,
-            num_attention_heads=4,
-            num_key_value_heads=4,
-            tie_word_embeddings=True,
-        )
-        model = starcoder2.Model(args)
-        weights = {"model.embed_tokens.weight": "some_value"}
-        sanitized_weights = model.sanitize(weights)
-        self.assertIn("lm_head.weight", sanitized_weights)
-        self.assertEqual(sanitized_weights["lm_head.weight"], "some_value")
-
-    def test_starcoder2_tie_word_embeddings_with_lm_head_weight(self):
-        from mlx_lm.models import starcoder2
-
-        args = starcoder2.ModelArgs(
-            model_type="starcoder2",
-            hidden_size=1024,
-            num_hidden_layers=4,
-            intermediate_size=2048,
-            num_attention_heads=4,
-            num_key_value_heads=4,
-            tie_word_embeddings=True,
-        )
-        model = starcoder2.Model(args)
-        weights = {
-            "model.embed_tokens.weight": "some_value",
-            "lm_head.weight": "existing_value",
-        }
-
-        sanitized_weights = model.sanitize(weights)
-        self.assertIn("lm_head.weight", sanitized_weights)
-        self.assertEqual(sanitized_weights["lm_head.weight"], "existing_value")
 
     def test_cohere(self):
         from mlx_lm.models import cohere

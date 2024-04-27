@@ -1,7 +1,6 @@
 # Copyright © 2024 Apple Inc.
 
 import argparse
-import json
 import math
 import re
 import types
@@ -15,8 +14,8 @@ from mlx.utils import tree_flatten
 
 from .tuner.datasets import load_dataset
 from .tuner.trainer import TrainingArgs, TrainingCallback, evaluate, train
-from .tuner.utils import build_schedule, linear_to_lora_layers
-from .utils import load
+from .tuner.utils import apply_lora_layers, build_schedule, linear_to_lora_layers
+from .utils import load, save_config
 
 yaml_loader = yaml.SafeLoader
 yaml_loader.add_implicit_resolver(
@@ -48,7 +47,7 @@ CONFIG_DEFAULTS = {
     "steps_per_report": 10,
     "steps_per_eval": 200,
     "resume_adapter_file": None,
-    "adapter_file": "adapters.npz",
+    "adapter_path": "adapters",
     "save_every": 100,
     "test": False,
     "test_batches": 500,
@@ -102,12 +101,12 @@ def build_parser():
     parser.add_argument(
         "--resume-adapter-file",
         type=str,
-        help="Load path to resume training with the given adapter weights.",
+        help="Load path to resume training with the given adapters.",
     )
     parser.add_argument(
-        "--adapter-file",
+        "--adapter-path",
         type=str,
-        help="Save/load path for the trained adapter weights.",
+        help="Save/load path for the adapters.",
     )
     parser.add_argument(
         "--save-every",
@@ -171,10 +170,21 @@ def run(args, training_callback: TrainingCallback = None):
 
     # Freeze all layers
     model.freeze()
-    # Convert linear layers to lora layers and unfreeze in the process
-    linear_to_lora_layers(model, args.lora_layers, args.lora_parameters)
 
-    print_trainable_parameters(model)
+    adapter_path = Path(args.adapter_path)
+    adapter_file = adapter_path / "adapters.safetensors"
+
+    if args.test and not args.train:
+        apply_lora_layers(model, adapter_path)
+
+    else:
+        adapter_path.mkdir(parents=True, exist_ok=True)
+        save_config(vars(args), adapter_path / "adapter_config.json")
+
+        # Convert linear layers to lora layers and unfreeze in the process
+        linear_to_lora_layers(model, args.lora_layers, args.lora_parameters)
+
+        print_trainable_parameters(model)
 
     print("Loading datasets")
     train_set, valid_set, test_set = load_dataset(args, tokenizer)
@@ -194,7 +204,7 @@ def run(args, training_callback: TrainingCallback = None):
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             steps_per_save=args.save_every,
-            adapter_file=args.adapter_file,
+            adapter_file=adapter_file,
             max_seq_length=args.max_seq_length,
             grad_checkpoint=args.grad_checkpoint,
         )
@@ -218,14 +228,6 @@ def run(args, training_callback: TrainingCallback = None):
             training_callback=training_callback,
         )
 
-    # Load the LoRA adapter weights which we assume should exist by this point
-    if not Path(args.adapter_file).is_file():
-        raise ValueError(
-            f"Adapter file {args.adapter_file} missing. "
-            "Use --train to learn and save the adapters.npz."
-        )
-    model.load_weights(args.adapter_file, strict=False)
-
     if args.test:
         print("Testing")
         model.eval()
@@ -243,7 +245,7 @@ def run(args, training_callback: TrainingCallback = None):
         print(f"Test loss {test_loss:.3f}, Test ppl {test_ppl:.3f}.")
 
 
-if __name__ == "__main__":
+def main():
     parser = build_parser()
     args = parser.parse_args()
     config = args.config
@@ -262,3 +264,7 @@ if __name__ == "__main__":
         if not args.get(k, None):
             args[k] = v
     run(types.SimpleNamespace(**args))
+
+
+if __name__ == "__main__":
+    main()

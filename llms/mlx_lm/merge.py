@@ -2,7 +2,6 @@
 
 import argparse
 import glob
-import json
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -163,7 +162,11 @@ def merge(
         upload_to_hub(mlx_path, upload_repo, base_hf_path)
 
 
-if __name__ == "__main__":
+def main():
     parser = configure_parser()
     args = parser.parse_args()
     merge(**vars(args))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,7 @@
-import os
+# Copyright © 2024 Apple Inc.
+import json
+import types
+from pathlib import Path
 from typing import Dict
 
 import mlx.core as mx
@@ -70,15 +73,22 @@ def linear_to_lora_layers(
         "mixtral",
         "stablelm",
         "qwen2",
+        "qwen2_moe",
         "gemma",
         "starcoder2",
         "cohere",
+        "minicpm",
     ]:
         keys = set(["self_attn.q_proj", "self_attn.v_proj"])
         if model.model_type == "mixtral":
             keys.add("block_sparse_moe.gate")
+        if model.model_type == "qwen2_moe":
+            keys.add("mlp.gate")
+            keys.add("mlp.shared_expert_gate")
     elif model.model_type == "olmo":
         keys = set(["att_proj"])
+    elif model.model_type in ["phi3", "openelm"]:
+        keys = set(["self_attn.qkv_proj"])
     elif model.model_type == "phi-msft":
         keys = set(["mixer.Wqkv", "moe.gate"])
     elif model.model_type == "dbrx":
@@ -87,40 +97,28 @@ def linear_to_lora_layers(
         raise ValueError(f"Lora does not support {model.model_type}")
 
     for l in model.layers[num_layers - num_lora_layers :]:
-        modules = l.named_modules()
         lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k in keys]
         l.update_modules(tree_unflatten(lora_layers))
 
 
-def apply_lora_layers(model: nn.Module, adapter_file: str) -> nn.Module:
+def apply_lora_layers(model: nn.Module, adapter_path: str) -> nn.Module:
     """
     Apply LoRA layers to the model.
 
     Args:
         model (nn.Module): The neural network model.
-        adapter_file (str): Path to the adapter configuration file.
+        adapter_path (str): Path to the adapter configuration file.
 
     Returns:
         nn.Module: The updated model with LoRA layers applied.
     """
-    if not os.path.exists(adapter_file):
-        raise FileNotFoundError(f"The adapter file does not exist: {adapter_file}")
-
-    adapters = list(mx.load(adapter_file).items())
-
-    linear_replacements = []
-    lora_layers = set(
-        [name.replace(".lora_a", "").replace(".lora_b", "") for name, _ in adapters]
-    )
-    for name, module in model.named_modules():
-        if name in lora_layers:
-            replacement_module = LoRALinear.from_linear(module)
-            linear_replacements.append((name, replacement_module))
-
-    model.update_modules(tree_unflatten(linear_replacements))
-
-    model.update(tree_unflatten(adapters))
-
+    adapter_path = Path(adapter_path)
+    if not adapter_path.exists():
+        raise FileNotFoundError(f"The adapter path does not exist: {adapter_path}")
+    with open(adapter_path / "adapter_config.json", "r") as fid:
+        config = types.SimpleNamespace(**json.load(fid))
+    linear_to_lora_layers(model, config.lora_layers, config.lora_parameters)
+    model.load_weights(str(adapter_path / "adapters.safetensors"), strict=False)
     return model
 
 
@@ -152,6 +150,19 @@ def dequantize(model: nn.Module) -> nn.Module:
             if bias:
                 linear.bias = module.bias
             de_quantize_layers.append((name, linear))
+        if isinstance(module, nn.QuantizedEmbedding):
+            weight = mx.dequantize(
+                module.weight,
+                module.scales,
+                module.biases,
+                module.group_size,
+                module.bits,
+            ).astype(mx.float16)
+            num_embeddings, dims = weight.shape
+            emb = nn.Embedding(num_embeddings, dims)
+            emb.weight = weight
+            de_quantize_layers.append((name, emb))
+
     if len(de_quantize_layers) > 0:
         model.update_modules(tree_unflatten(de_quantize_layers))
     return model
